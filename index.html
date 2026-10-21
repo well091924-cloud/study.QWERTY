@@ -4,36 +4,42 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bậc Thầy Ngôn Ngữ V2</title>
+    <!-- Thư viện SheetJS để xử lý file Excel trực tiếp trên trình duyệt -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background: #fdfdfd; margin: 0; }
         
+        /* Các icon công cụ góc trái */
         .toolbar { position: fixed; top: 20px; left: 20px; display: flex; gap: 15px; opacity: 0.5; transition: 0.3s; z-index: 10; }
         .toolbar:hover { opacity: 1; }
         .icon-btn { cursor: pointer; font-size: 1.5rem; background: none; border: none; padding: 5px; }
 
+        /* Vùng trung tâm */
         .main-container { text-align: center; }
         .question { font-size: 1.8rem; color: #333; margin-bottom: 40px; font-weight: bold; }
         
+        /* Hiệu ứng hiển thị chữ và hover xem đáp án */
         .typing-container { font-size: 3.5rem; font-weight: bold; cursor: text; letter-spacing: 8px; display: inline-flex; gap: 5px; padding: 20px;}
         .char { position: relative; min-width: 40px; text-align: center; }
         .char.correct { color: #4caf50; }
         .char.incorrect { color: #f44336; background: #ffebee; border-radius: 4px; }
         .char.pending { color: transparent; border-bottom: 4px solid #ccc; }
+        
+        /* Logic CSS: Hover vào vùng gõ sẽ làm hiện chữ mờ ở các ô chưa gõ */
         .char.pending::after { content: attr(data-char); position: absolute; left: 50%; transform: translateX(-50%); color: transparent; transition: color 0.2s; }
         .typing-container:hover .char.pending::after { color: #e0e0e0; }
 
         #hidden-input { position: absolute; opacity: 0; pointer-events: none; }
         #file-upload { display: none; }
 
-        /* Giao diện Modal Cài đặt */
-        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 100; }
-        .modal-content { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); width: 350px; text-align: left; }
-        .modal-content h3 { margin-top: 0; text-align: center; }
+        /* Modal Cài đặt */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 100; justify-content: center; align-items: center; }
+        .modal-content { background: white; padding: 30px 40px; border-radius: 12px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); text-align: left; width: 350px; }
+        .modal-content h2 { margin-top: 0; text-align: center; font-size: 1.5rem; color: #333; }
         .form-group { margin-bottom: 15px; }
-        .form-group label { display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.9rem;}
+        .form-group label { display: block; font-weight: bold; margin-bottom: 5px; color: #555; }
         .form-group select { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ccc; font-size: 1rem; }
-        .btn-start { display: block; width: 100%; padding: 10px; background: black; color: white; border: none; border-radius: 6px; font-size: 1.1rem; font-weight: bold; cursor: pointer; margin-top: 20px; }
+        .btn-start { width: 100%; padding: 12px; background: #111; color: white; border: none; border-radius: 6px; font-size: 1.1rem; font-weight: bold; cursor: pointer; margin-top: 10px; }
         .btn-start:hover { background: #333; }
     </style>
 </head>
@@ -42,58 +48,68 @@
     <div class="toolbar">
         <label for="file-upload" class="icon-btn" title="Nhập file Excel">📁</label>
         <input type="file" id="file-upload" accept=".xlsx, .xls">
-        <button class="icon-btn" title="Lưu Excel" onclick="exportExcel()">💾</button>
+        <button class="icon-btn" title="Lưu/Xuất Excel" onclick="exportExcel()">💾</button>
+        <button class="icon-btn" title="Cài đặt Cột & Âm thanh" onclick="openSettings()">⚙️</button>
         <button class="icon-btn" title="Tạm dừng/Lưu tiến trình" onclick="saveProgress()">⏸️</button>
     </div>
 
-    <!-- Khung Popup Cài Đặt -->
-    <div class="modal-overlay" id="config-modal">
-        <div class="modal-content">
-            <h3>⚙️ Thiết lập bài học</h3>
-            <div class="form-group">
-                <label>Cột chứa Câu Hỏi:</label>
-                <select id="q-col-select"></select>
-            </div>
-            <div class="form-group">
-                <label>Cột chứa Đáp Án (Từ cần gõ):</label>
-                <select id="a-col-select"></select>
-            </div>
-            <div class="form-group">
-                <label>Ngôn ngữ đọc (Phát âm):</label>
-                <select id="lang-select">
-                    <option value="en-US">Tiếng Anh (US)</option>
-                    <option value="zh-CN">Tiếng Trung (Giản thể)</option>
-                    <option value="vi-VN">Tiếng Việt</option>
-                    <option value="ja-JP">Tiếng Nhật</option>
-                </select>
-            </div>
-            <button class="btn-start" onclick="startTest()">BẮT ĐẦU</button>
-        </div>
-    </div>
-
+    <!-- Màn hình chính -->
     <div class="main-container" id="app-area">
         <div class="question" id="question-text">Tải file Excel để bắt đầu...</div>
         <div class="typing-container" id="display-area"></div>
         <input type="text" id="hidden-input" autocomplete="off">
     </div>
 
+    <!-- Pop-up Cài đặt -->
+    <div class="modal-overlay" id="config-modal">
+        <div class="modal-content">
+            <h2>⚙️ Cài đặt bài học</h2>
+            
+            <div class="form-group">
+                <label>Chọn cột CÂU HỎI:</label>
+                <select id="col-q-select"></select>
+            </div>
+            
+            <div class="form-group">
+                <label>Chọn cột TRẢ LỜI:</label>
+                <select id="col-a-select"></select>
+            </div>
+
+            <div class="form-group">
+                <label>Ngôn ngữ phát âm (AI):</label>
+                <select id="tts-lang-select">
+                    <option value="en-US">Tiếng Anh (Mỹ)</option>
+                    <option value="en-GB">Tiếng Anh (Anh)</option>
+                    <option value="zh-CN">Tiếng Trung (Giản thể)</option>
+                    <option value="zh-TW">Tiếng Trung (Phồn thể)</option>
+                    <option value="vi-VN">Tiếng Việt</option>
+                </select>
+            </div>
+
+            <button class="btn-start" onclick="startTest()">BẮT ĐẦU KIỂM TRA</button>
+        </div>
+    </div>
+
     <script>
+        // --- CẤU HÌNH ÂM THANH ---
         const soundCorrect = new Audio('tick.mp3'); 
         const soundWrong = new Audio('beep.mp3');
         soundCorrect.volume = 0.5; soundWrong.volume = 0.5;
 
+        // --- BIẾN TOÀN CỤC ---
+        let globalRawData = []; // Lưu trữ dữ liệu Excel thô
         let testData = [];
         let currentIndex = 0;
         let targetWord = "";
         let isErrorInCurrentWord = false;
-        let rawExcelData = []; // Lưu tạm data excel để map cột
-        let ttsLang = 'en-US'; // Mặc định tiếng Anh
+        let ttsLang = "en-US";
         
         const displayArea = document.getElementById('display-area');
         const hiddenInput = document.getElementById('hidden-input');
         const questionText = document.getElementById('question-text');
         const configModal = document.getElementById('config-modal');
 
+        // --- KHÔI PHỤC TIẾN TRÌNH ---
         window.onload = () => {
             const savedData = localStorage.getItem('vocab_progress');
             if (savedData) {
@@ -101,7 +117,7 @@
                     const parsed = JSON.parse(savedData);
                     testData = parsed.testData;
                     currentIndex = parsed.currentIndex;
-                    ttsLang = parsed.ttsLang || 'en-US';
+                    ttsLang = parsed.ttsLang || "en-US";
                     loadQuestion();
                 } else {
                     localStorage.removeItem('vocab_progress');
@@ -109,9 +125,19 @@
             }
         };
 
-        // Đọc Excel và mở Modal Chọn Cột
+        // --- MỞ CÀI ĐẶT THỦ CÔNG ---
+        function openSettings() {
+            if (globalRawData.length > 0) {
+                configModal.style.display = 'flex';
+            } else {
+                alert("Vui lòng tải file Excel lên trước!");
+            }
+        }
+
+        // --- XỬ LÝ NHẬP FILE EXCEL ---
         document.getElementById('file-upload').addEventListener('change', (e) => {
             const file = e.target.files[0];
+            if (!file) return;
             const reader = new FileReader();
             reader.onload = (event) => {
                 const data = new Uint8Array(event.target.result);
@@ -119,63 +145,84 @@
                 const sheetName = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[sheetName];
                 
-                // header: 1 trả về mảng 2 chiều (dòng x cột)
-                rawExcelData = XLSX.utils.sheet_to_json(worksheet, {header: 1}); 
+                // Trích xuất thành mảng 2 chiều
+                globalRawData = XLSX.utils.sheet_to_json(worksheet, {header: 1});
                 
-                if(rawExcelData.length === 0) return;
+                if (globalRawData.length < 2) {
+                    alert("File Excel không có đủ dữ liệu hợp lệ!");
+                    return;
+                }
 
-                // Lấy tiêu đề cột ở dòng đầu tiên
-                const headers = rawExcelData[0];
-                const qSelect = document.getElementById('q-col-select');
-                const aSelect = document.getElementById('a-col-select');
+                // Nạp tiêu đề các cột vào Select box
+                const headers = globalRawData[0];
+                const colQSelect = document.getElementById('col-q-select');
+                const colASelect = document.getElementById('col-a-select');
                 
-                qSelect.innerHTML = ''; aSelect.innerHTML = '';
-                
+                colQSelect.innerHTML = '';
+                colASelect.innerHTML = '';
+
                 headers.forEach((header, index) => {
-                    if (header) {
-                        qSelect.add(new Option(header, index));
-                        aSelect.add(new Option(header, index));
-                    }
+                    let opt1 = document.createElement('option');
+                    opt1.value = index; opt1.text = header || `Cột ${index + 1}`;
+                    colQSelect.appendChild(opt1);
+
+                    let opt2 = document.createElement('option');
+                    opt2.value = index; opt2.text = header || `Cột ${index + 1}`;
+                    colASelect.appendChild(opt2);
                 });
 
-                // Tự động chọn lệch cột 0 và 1 nếu có
-                if (headers.length > 1) { aSelect.selectedIndex = 1; }
+                // Gợi ý mặc định (Cột 0 là Hỏi, Cột 1 là Đáp án)
+                if (headers.length > 1) {
+                    colASelect.selectedIndex = 1;
+                }
 
-                // Hiện popup
+                // Hiện Modal cấu hình
                 configModal.style.display = 'flex';
-                document.getElementById('file-upload').value = ''; 
             };
             reader.readAsArrayBuffer(file);
+            e.target.value = ''; // Reset input
         });
 
-        // Nút Bắt đầu trong Modal
+        // --- XÁC NHẬN CÀI ĐẶT & BẮT ĐẦU ---
         function startTest() {
-            const qIdx = document.getElementById('q-col-select').value;
-            const aIdx = document.getElementById('a-col-select').value;
-            ttsLang = document.getElementById('lang-select').value;
+            const qIdx = parseInt(document.getElementById('col-q-select').value);
+            const aIdx = parseInt(document.getElementById('col-a-select').value);
+            ttsLang = document.getElementById('tts-lang-select').value;
 
             testData = [];
-            // Bỏ qua dòng header (index 0)
-            for (let i = 1; i < rawExcelData.length; i++) {
-                let row = rawExcelData[i];
-                if (row[qIdx] && row[aIdx]) {
-                    testData.push({ Q: row[qIdx].toString(), A: row[aIdx].toString(), Note: "Not Tested" });
+            for (let i = 1; i < globalRawData.length; i++) {
+                const row = globalRawData[i];
+                if (row[qIdx] !== undefined && row[aIdx] !== undefined) {
+                    testData.push({ 
+                        Q: String(row[qIdx]).trim(), 
+                        A: String(row[aIdx]).trim(), 
+                        Note: "Not Tested" 
+                    });
                 }
             }
-            
+
+            if (testData.length === 0) {
+                alert("Không có dữ liệu ở các cột đã chọn!"); return;
+            }
+
+            configModal.style.display = 'none';
             currentIndex = 0;
             localStorage.removeItem('vocab_progress');
-            configModal.style.display = 'none';
             loadQuestion();
         }
 
+        // --- XỬ LÝ TEXT TO SPEECH ---
         function playPronunciation() {
             if (!targetWord) return;
+            // Dừng các giọng đọc cũ đang dở (nếu có)
+            window.speechSynthesis.cancel();
+            
             const utterance = new SpeechSynthesisUtterance(targetWord);
-            utterance.lang = ttsLang; // Sử dụng ngôn ngữ đã chọn trong Modal
+            utterance.lang = ttsLang;
             window.speechSynthesis.speak(utterance);
         }
 
+        // Bắt sự kiện Ctrl + J
         document.addEventListener('keydown', (e) => {
             if (e.ctrlKey && e.key.toLowerCase() === 'j') {
                 e.preventDefault();
@@ -183,6 +230,7 @@
             }
         });
 
+        // --- HIỂN THỊ CÂU HỎI ---
         function loadQuestion() {
             if (currentIndex >= testData.length) {
                 questionText.innerText = "🎉 Hoàn thành bài học!";
@@ -194,16 +242,17 @@
 
             const currentItem = testData[currentIndex];
             questionText.innerText = currentItem.Q;
-            targetWord = currentItem.A.trim();
+            targetWord = currentItem.A;
             isErrorInCurrentWord = false;
             hiddenInput.value = '';
             
+            // Tự động đọc phát âm
             playPronunciation();
 
             displayArea.innerHTML = '';
             for (let i = 0; i < targetWord.length; i++) {
                 let span = document.createElement('span');
-                span.dataset.char = targetWord[i];
+                span.dataset.char = targetWord[i]; 
                 
                 if (targetWord[i] === ' ') {
                     span.innerHTML = '&nbsp;';
@@ -217,6 +266,7 @@
             hiddenInput.focus();
         }
 
+        // --- LOGIC NHẬP LIỆU ---
         hiddenInput.addEventListener('input', (e) => {
             const typedText = e.target.value;
             const spans = displayArea.querySelectorAll('span');
@@ -253,6 +303,7 @@
                 }
             }
 
+            // Chuyển câu tức thì
             if (typedText.length === targetWord.length && !currentError) {
                 if (testData[currentIndex].Note === "Not Tested") {
                     testData[currentIndex].Note = isErrorInCurrentWord ? "Try again" : "Done";
@@ -261,15 +312,20 @@
                 }
 
                 currentIndex++;
-                setTimeout(loadQuestion, 50);
+                setTimeout(loadQuestion, 50); 
             }
         });
 
+        // Bấm ra ngoài vùng gõ vẫn focus lại vào input ẩn
         document.body.addEventListener('click', (e) => {
-            if(configModal.style.display !== 'flex') hiddenInput.focus();
+            if (!configModal.contains(e.target) && configModal.style.display !== 'flex') {
+                hiddenInput.focus();
+            }
         });
 
+        // --- LƯU TRỮ VÀ XUẤT DỮ LIỆU ---
         function saveProgress() {
+            if (testData.length === 0) return;
             const progress = { testData, currentIndex, ttsLang };
             localStorage.setItem('vocab_progress', JSON.stringify(progress));
             alert("Đã lưu tiến trình vào trình duyệt!");
