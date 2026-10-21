@@ -97,7 +97,7 @@
         soundCorrect.volume = 0.5; soundWrong.volume = 0.5;
 
         // --- BIẾN TOÀN CỤC ---
-        let globalRawData = []; // Lưu trữ dữ liệu Excel thô
+        let globalRawData = []; 
         let testData = [];
         let currentIndex = 0;
         let targetWord = "";
@@ -145,7 +145,6 @@
                 const sheetName = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[sheetName];
                 
-                // Trích xuất thành mảng 2 chiều
                 globalRawData = XLSX.utils.sheet_to_json(worksheet, {header: 1});
                 
                 if (globalRawData.length < 2) {
@@ -153,7 +152,6 @@
                     return;
                 }
 
-                // Nạp tiêu đề các cột vào Select box
                 const headers = globalRawData[0];
                 const colQSelect = document.getElementById('col-q-select');
                 const colASelect = document.getElementById('col-a-select');
@@ -171,16 +169,14 @@
                     colASelect.appendChild(opt2);
                 });
 
-                // Gợi ý mặc định (Cột 0 là Hỏi, Cột 1 là Đáp án)
                 if (headers.length > 1) {
                     colASelect.selectedIndex = 1;
                 }
 
-                // Hiện Modal cấu hình
                 configModal.style.display = 'flex';
             };
             reader.readAsArrayBuffer(file);
-            e.target.value = ''; // Reset input
+            e.target.value = ''; 
         });
 
         // --- XÁC NHẬN CÀI ĐẶT & BẮT ĐẦU ---
@@ -214,7 +210,6 @@
         // --- XỬ LÝ TEXT TO SPEECH ---
         function playPronunciation() {
             if (!targetWord) return;
-            // Dừng các giọng đọc cũ đang dở (nếu có)
             window.speechSynthesis.cancel();
             
             const utterance = new SpeechSynthesisUtterance(targetWord);
@@ -222,7 +217,6 @@
             window.speechSynthesis.speak(utterance);
         }
 
-        // Bắt sự kiện Ctrl + J
         document.addEventListener('keydown', (e) => {
             if (e.ctrlKey && e.key.toLowerCase() === 'j') {
                 e.preventDefault();
@@ -246,7 +240,6 @@
             isErrorInCurrentWord = false;
             hiddenInput.value = '';
             
-            // Tự động đọc phát âm
             playPronunciation();
 
             displayArea.innerHTML = '';
@@ -295,16 +288,17 @@
                 }
             }
 
-            if (typedText.length > 0) {
-                if (currentError) {
-                    soundWrong.currentTime = 0; soundWrong.play().catch(()=>{});
-                } else {
-                    soundCorrect.currentTime = 0; soundCorrect.play().catch(()=>{});
-                }
+            // Chỉ phát âm thanh báo lỗi khi gõ sai 1 ký tự
+            if (typedText.length > 0 && currentError) {
+                soundWrong.currentTime = 0; soundWrong.play().catch(()=>{});
             }
 
-            // Chuyển câu tức thì
+            // Chuyển câu tức thì và phát âm thanh khi gõ đúng cả cụm
             if (typedText.length === targetWord.length && !currentError) {
+                
+                // Phát âm thanh hoàn thành từ
+                soundCorrect.currentTime = 0; soundCorrect.play().catch(()=>{});
+
                 if (testData[currentIndex].Note === "Not Tested") {
                     testData[currentIndex].Note = isErrorInCurrentWord ? "Try again" : "Done";
                 } else if (testData[currentIndex].Note === "Try again" && isErrorInCurrentWord) {
