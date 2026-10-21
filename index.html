@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bậc Thầy Ngôn Ngữ V2</title>
+    <!-- Thư viện SheetJS để xử lý file Excel trực tiếp trên trình duyệt -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background: #fdfdfd; margin: 0; }
+        
+        /* Các icon công cụ góc trái */
+        .toolbar { position: fixed; top: 20px; left: 20px; display: flex; gap: 15px; opacity: 0.5; transition: 0.3s; }
+        .toolbar:hover { opacity: 1; }
+        .icon-btn { cursor: pointer; font-size: 1.5rem; background: none; border: none; padding: 5px; }
+
+        /* Vùng trung tâm */
+        .main-container { text-align: center; }
+        .question { font-size: 1.8rem; color: #333; margin-bottom: 40px; font-weight: bold; }
+        
+        /* Hiệu ứng hiển thị chữ và hover xem đáp án */
+        .typing-container { font-size: 3.5rem; font-weight: bold; cursor: text; letter-spacing: 8px; display: inline-flex; gap: 5px; padding: 20px;}
+        .char { position: relative; min-width: 40px; text-align: center; }
+        .char.correct { color: #4caf50; }
+        .char.incorrect { color: #f44336; background: #ffebee; border-radius: 4px; }
+        .char.pending { color: transparent; border-bottom: 4px solid #ccc; }
+        
+        /* Logic CSS: Hover vào vùng gõ (typing-container) sẽ làm hiện data-char mờ mờ ở các ô pending */
+        .char.pending::after { content: attr(data-char); position: absolute; left: 50%; transform: translateX(-50%); color: transparent; transition: color 0.2s; }
+        .typing-container:hover .char.pending::after { color: #e0e0e0; }
+
+        #hidden-input { position: absolute; opacity: 0; pointer-events: none; }
+        #file-upload { display: none; }
+    </style>
+</head>
+<body>
+
+    <div class="toolbar">
+        <label for="file-upload" class="icon-btn" title="Nhập file Excel">📁</label>
+        <input type="file" id="file-upload" accept=".xlsx, .xls">
+        <button class="icon-btn" title="Lưu Excel" onclick="exportExcel()">💾</button>
+        <button class="icon-btn" title="Tạm dừng/Lưu tiến trình" onclick="saveProgress()">⏸️</button>
+    </div>
+
+    <div class="main-container" id="app-area">
+        <div class="question" id="question-text">Tải file Excel để bắt đầu...</div>
+        <div class="typing-container" id="display-area"></div>
+        <input type="text" id="hidden-input" autocomplete="off">
+    </div>
+
+    <script>
+        // --- CẤU HÌNH ÂM THANH ---
+        // Thay đường dẫn bằng file mp3 thực tế bạn sẽ up lên Github
+        const soundCorrect = new Audio('tick.mp3'); 
+        const soundWrong = new Audio('beep.mp3');
+        soundCorrect.volume = 0.5; soundWrong.volume = 0.5;
+
+        // --- BIẾN TOÀN CỤC ---
+        let testData = [];
+        let currentIndex = 0;
+        let targetWord = "";
+        let isErrorInCurrentWord = false;
+        
+        const displayArea = document.getElementById('display-area');
+        const hiddenInput = document.getElementById('hidden-input');
+        const questionText = document.getElementById('question-text');
+
+        // --- KHÔI PHỤC TIẾN TRÌNH TỪ TRÌNH DUYỆT (LOCALSTORAGE) ---
+        window.onload = () => {
+            const savedData = localStorage.getItem('vocab_progress');
+            if (savedData) {
+                if (confirm("Phát hiện bài học chưa hoàn thành. Bạn có muốn tiếp tục?")) {
+                    const parsed = JSON.parse(savedData);
+                    testData = parsed.testData;
+                    currentIndex = parsed.currentIndex;
+                    loadQuestion();
+                } else {
+                    localStorage.removeItem('vocab_progress');
+                }
+            }
+        };
+
+        // --- NHẬP FILE EXCEL ---
+        document.getElementById('file-upload').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const data = new Uint8Array(event.target.result);
+                const workbook = XLSX.read(data, {type: 'array'});
+                const sheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[sheetName];
+                const json = XLSX.utils.sheet_to_json(worksheet, {header: 1});
+                
+                // Giả định Cột 0 là Câu hỏi, Cột 1 là Đáp án
+                testData = [];
+                for (let i = 1; i < json.length; i++) {
+                    if (json[i][0] && json[i][1]) {
+                        testData.push({ Q: json[i][0].toString(), A: json[i][1].toString(), Note: "Not Tested" });
+                    }
+                }
+                currentIndex = 0;
+                localStorage.removeItem('vocab_progress'); // Xóa tiến trình cũ
+                loadQuestion();
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        // --- XỬ LÝ TEXT TO SPEECH ---
+        function playPronunciation() {
+            if (!targetWord) return;
+            const utterance = new SpeechSynthesisUtterance(targetWord);
+            utterance.lang = 'en-US'; // Chỉnh ngôn ngữ nếu cần (VD: zh-CN cho tiếng Trung)
+            window.speechSynthesis.speak(utterance);
+        }
+
+        // Bắt sự kiện Ctrl + J
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key.toLowerCase() === 'j') {
+                e.preventDefault();
+                playPronunciation();
+            }
+        });
+
+        // --- HIỂN THỊ CÂU HỎI ---
+        function loadQuestion() {
+            if (currentIndex >= testData.length) {
+                questionText.innerText = "🎉 Hoàn thành bài học!";
+                displayArea.innerHTML = '';
+                hiddenInput.blur();
+                saveProgress();
+                return;
+            }
+
+            const currentItem = testData[currentIndex];
+            questionText.innerText = currentItem.Q;
+            targetWord = currentItem.A.trim();
+            isErrorInCurrentWord = false;
+            hiddenInput.value = '';
+            
+            // Tự động đọc phát âm khi từ mới xuất hiện
+            playPronunciation();
+
+            displayArea.innerHTML = '';
+            for (let i = 0; i < targetWord.length; i++) {
+                let span = document.createElement('span');
+                span.dataset.char = targetWord[i]; // Gắn ký tự thật vào data-char để CSS Hover có thể đọc được
+                
+                if (targetWord[i] === ' ') {
+                    span.innerHTML = '&nbsp;';
+                    span.className = 'char pending';
+                } else {
+                    span.innerText = '_';
+                    span.className = 'char pending';
+                }
+                displayArea.appendChild(span);
+            }
+            hiddenInput.focus();
+        }
+
+        // --- LOGIC NHẬP LIỆU THỜI GIAN THỰC ---
+        hiddenInput.addEventListener('input', (e) => {
+            const typedText = e.target.value;
+            const spans = displayArea.querySelectorAll('span');
+            
+            if (typedText.length > targetWord.length) {
+                hiddenInput.value = typedText.substring(0, targetWord.length);
+                return;
+            }
+
+            let currentError = false;
+
+            for (let i = 0; i < targetWord.length; i++) {
+                if (i < typedText.length) {
+                    if (typedText[i].toLowerCase() === targetWord[i].toLowerCase()) {
+                        spans[i].innerText = targetWord[i];
+                        spans[i].className = 'char correct';
+                    } else {
+                        spans[i].innerText = typedText[i] === ' ' ? '_' : typedText[i];
+                        spans[i].className = 'char incorrect';
+                        currentError = true;
+                        isErrorInCurrentWord = true;
+                    }
+                } else {
+                    spans[i].innerText = targetWord[i] === ' ' ? '\u00A0' : '_';
+                    spans[i].className = 'char pending';
+                }
+            }
+
+            // Xử lý âm thanh gõ phím
+            if (typedText.length > 0) {
+                if (currentError) {
+                    soundWrong.currentTime = 0; soundWrong.play().catch(()=>{});
+                } else {
+                    soundCorrect.currentTime = 0; soundCorrect.play().catch(()=>{});
+                }
+            }
+
+            // Chuyển câu tức thì nếu đúng độ dài và không có lỗi
+            if (typedText.length === targetWord.length && !currentError) {
+                // Đánh giá Note
+                if (testData[currentIndex].Note === "Not Tested") {
+                    testData[currentIndex].Note = isErrorInCurrentWord ? "Try again" : "Done";
+                } else if (testData[currentIndex].Note === "Try again" && isErrorInCurrentWord) {
+                    testData[currentIndex].Note = "No";
+                }
+
+                // Tự động nhảy câu
+                currentIndex++;
+                setTimeout(loadQuestion, 50); // Delay 50ms tạo cảm giác mượt
+            }
+        });
+
+        // Click ngoài tự focus lại vào ô nhập
+        document.body.addEventListener('click', () => hiddenInput.focus());
+
+        // --- LƯU TRỮ VÀ XUẤT DỮ LIỆU ---
+        function saveProgress() {
+            const progress = { testData, currentIndex };
+            localStorage.setItem('vocab_progress', JSON.stringify(progress));
+            alert("Đã lưu tiến trình vào trình duyệt!");
+        }
+
+        function exportExcel() {
+            if (testData.length === 0) {
+                alert("Không có dữ liệu để xuất!"); return;
+            }
+            
+            // Xây dựng mảng dữ liệu cho SheetJS
+            let exportArr = [["CÂU HỎI", "TRẢ LỜI", "NOTE"]];
+            testData.forEach(item => {
+                exportArr.push([item.Q, item.A, item.Note]);
+            });
+
+            const ws = XLSX.utils.aoa_to_sheet(exportArr);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Ket_Qua");
+            XLSX.writeFile(wb, "Ket_Qua_Vocab.xlsx");
+            
+            // Xóa tiến trình sau khi xuất thành công
+            localStorage.removeItem('vocab_progress');
+        }
+    </script>
+</body>
+</html>
